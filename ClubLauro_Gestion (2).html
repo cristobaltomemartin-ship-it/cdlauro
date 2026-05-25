@@ -226,9 +226,44 @@ textarea.fc{resize:vertical;min-height:70px}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
 .main{padding-bottom:38px}
 @media(max-width:700px){.sync-bar{left:0}}
+
+/* LOGIN */
+.login-overlay{position:fixed;inset:0;background:linear-gradient(135deg,#0f4f30,#1a7a4a);z-index:9999;display:flex;align-items:center;justify-content:center;font-family:'Outfit',sans-serif}
+.login-box{background:#fff;border-radius:20px;padding:40px;width:100%;max-width:380px;box-shadow:0 20px 60px rgba(0,0,0,.3);text-align:center}
+.login-escudo{width:70px;height:70px;background:#d4a017;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:32px;margin:0 auto 16px}
+.login-box h2{font-size:22px;font-weight:800;color:#1a1d23;margin-bottom:4px}
+.login-box p{font-size:13px;color:#6c757d;margin-bottom:28px}
+.login-box input{width:100%;padding:12px 16px;border:2px solid #e2e6ea;border-radius:10px;font-family:'Outfit',sans-serif;font-size:15px;margin-bottom:12px;outline:none;transition:border-color .2s;box-sizing:border-box}
+.login-box input:focus{border-color:#1a7a4a}
+.login-btn{width:100%;padding:13px;background:#1a7a4a;color:#fff;border:none;border-radius:10px;font-family:'Outfit',sans-serif;font-size:15px;font-weight:700;cursor:pointer;transition:background .2s;margin-top:4px}
+.login-btn:hover{background:#25a862}
+.login-err{color:#c0392b;font-size:13px;margin-top:8px;min-height:20px}
+.login-footer{font-size:11px;color:#adb5bd;margin-top:20px}
+.session-warning{position:fixed;top:16px;right:16px;background:#d4a017;color:#fff;padding:12px 18px;border-radius:10px;font-size:13px;font-weight:600;z-index:9998;box-shadow:0 4px 16px rgba(0,0,0,.2);display:none;animation:slideIn .3s ease}
+@keyframes slideIn{from{transform:translateX(100px);opacity:0}to{transform:translateX(0);opacity:1}}
 </style>
 </head>
 <body>
+
+
+<!-- LOGIN OVERLAY -->
+<div class="login-overlay" id="loginOverlay">
+  <div class="login-box">
+    <div class="login-escudo">⚽</div>
+    <h2>Club Deportivo Lauro</h2>
+    <p>Alhaurín de la Torre · Málaga<br>Acceso restringido al personal del club</p>
+    <input type="text" id="loginUser" placeholder="Usuario" autocomplete="username" onkeydown="if(event.key==='Enter')document.getElementById('loginPass').focus()">
+    <input type="password" id="loginPass" placeholder="Contraseña" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()">
+    <button class="login-btn" onclick="doLogin()">🔐 Entrar</button>
+    <div class="login-err" id="loginErr"></div>
+    <div class="login-footer">© CD Lauro · Acceso solo personal autorizado</div>
+  </div>
+</div>
+
+<!-- SESSION WARNING -->
+<div class="session-warning" id="sessionWarning">
+  ⚠️ Sesión expirando en <span id="sessionCountdown">60</span>s — mueve el ratón para continuar
+</div>
 
 <aside class="sb">
   <div class="sb-logo">
@@ -1819,11 +1854,159 @@ window.addEventListener('load', () => {
     });
   });
 
-  // Auto-load if URL configured
-  if (_syncUrl) {
+  // Auto-load if URL configured AND logged in
+  if (_syncUrl && checkSession()) {
     setTimeout(syncLoad, 800);
-  } else {
+  } else if (!_syncUrl) {
     syncStatus('soff', 'Sin configurar — ve a ⚙️ Configuración para conectar la nube');
+  }
+});
+
+
+// ═══════════════════════════════════════════════
+// LOGIN & SESSION MANAGER
+// ═══════════════════════════════════════════════
+const AUTH = {
+  user: 'cdlauro',
+  pass: '000106',
+  sessionKey: 'cdlauro_session',
+  timeout: 15 * 60 * 1000, // 15 minutos en ms
+  warningAt: 60 * 1000,    // Avisar 1 minuto antes
+  timer: null,
+  warningTimer: null,
+  countdownTimer: null,
+  lastActivity: Date.now()
+};
+
+function doLogin() {
+  const u = document.getElementById('loginUser').value.trim();
+  const p = document.getElementById('loginPass').value;
+  const err = document.getElementById('loginErr');
+  
+  if (u === AUTH.user && p === AUTH.pass) {
+    // Guardar sesión
+    const session = { ts: Date.now(), user: u };
+    localStorage.setItem(AUTH.sessionKey, JSON.stringify(session));
+    document.getElementById('loginOverlay').style.display = 'none';
+    AUTH.lastActivity = Date.now();
+    startSessionTimer();
+    // Cargar datos nube si está configurado
+    if (typeof syncLoad === 'function') setTimeout(syncLoad, 500);
+  } else {
+    err.textContent = '❌ Usuario o contraseña incorrectos';
+    document.getElementById('loginPass').value = '';
+    document.getElementById('loginPass').focus();
+    // Shake animation
+    const box = document.querySelector('.login-box');
+    box.style.animation = 'none';
+    setTimeout(() => {
+      box.style.animation = 'shake .4s ease';
+    }, 10);
+  }
+}
+
+function checkSession() {
+  const stored = localStorage.getItem(AUTH.sessionKey);
+  if (!stored) return false;
+  try {
+    const s = JSON.parse(stored);
+    const elapsed = Date.now() - s.ts;
+    if (elapsed > AUTH.timeout) {
+      localStorage.removeItem(AUTH.sessionKey);
+      return false;
+    }
+    return true;
+  } catch(e) {
+    return false;
+  }
+}
+
+function logout() {
+  localStorage.removeItem(AUTH.sessionKey);
+  clearTimeout(AUTH.timer);
+  clearTimeout(AUTH.warningTimer);
+  clearInterval(AUTH.countdownTimer);
+  document.getElementById('loginOverlay').style.display = 'flex';
+  document.getElementById('loginUser').value = '';
+  document.getElementById('loginPass').value = '';
+  document.getElementById('loginErr').textContent = '';
+  document.getElementById('sessionWarning').style.display = 'none';
+}
+
+function startSessionTimer() {
+  clearTimeout(AUTH.timer);
+  clearTimeout(AUTH.warningTimer);
+  clearInterval(AUTH.countdownTimer);
+  
+  // Warning 1 minuto antes de cerrar
+  AUTH.warningTimer = setTimeout(() => {
+    showSessionWarning();
+  }, AUTH.timeout - AUTH.warningAt);
+  
+  // Cierre automático
+  AUTH.timer = setTimeout(() => {
+    document.getElementById('sessionWarning').style.display = 'none';
+    logout();
+    alert('⏱️ Sesión cerrada por inactividad (15 minutos). Vuelve a entrar.');
+  }, AUTH.timeout);
+}
+
+function showSessionWarning() {
+  const warn = document.getElementById('sessionWarning');
+  const countdown = document.getElementById('sessionCountdown');
+  warn.style.display = 'block';
+  let secs = 60;
+  countdown.textContent = secs;
+  AUTH.countdownTimer = setInterval(() => {
+    secs--;
+    countdown.textContent = secs;
+    if (secs <= 0) {
+      clearInterval(AUTH.countdownTimer);
+      warn.style.display = 'none';
+    }
+  }, 1000);
+}
+
+function resetSessionTimer() {
+  if (!checkSession()) return;
+  // Update session timestamp
+  const session = { ts: Date.now(), user: AUTH.user };
+  localStorage.setItem(AUTH.sessionKey, JSON.stringify(session));
+  AUTH.lastActivity = Date.now();
+  // Hide warning if showing
+  document.getElementById('sessionWarning').style.display = 'none';
+  clearInterval(AUTH.countdownTimer);
+  startSessionTimer();
+}
+
+// Detect activity
+['mousemove','keydown','click','touchstart','scroll'].forEach(evt => {
+  document.addEventListener(evt, () => {
+    if (checkSession()) resetSessionTimer();
+  }, { passive: true });
+});
+
+// Add logout button to sidebar
+document.addEventListener('DOMContentLoaded', () => {
+  // Add shake CSS
+  const style = document.createElement('style');
+  style.textContent = '@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-8px)}75%{transform:translateX(8px)}}';
+  document.head.appendChild(style);
+
+  // Add logout button to sidebar footer
+  const foot = document.querySelector('.sb-foot');
+  if (foot) {
+    foot.innerHTML = 'ClubManager Pro v3.0<br>© CD Lauro Alhaurín<br><button onclick="logout()" style="margin-top:8px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);color:rgba(255,255,255,.7);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:11px;font-family:Outfit,sans-serif">🔒 Cerrar sesión</button>';
+  }
+
+  // Check if already logged in
+  if (checkSession()) {
+    document.getElementById('loginOverlay').style.display = 'none';
+    startSessionTimer();
+    // Don't auto-syncLoad here — window.load handler does it
+  } else {
+    document.getElementById('loginOverlay').style.display = 'flex';
+    // Prevent sync until logged in
   }
 });
 
